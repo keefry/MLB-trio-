@@ -1,6 +1,6 @@
 """
-Find the trio of MLB batters who all homered on the same day the most times
-in the 2026 season. Uses the free MLB Stats API.
+Find MLB batter combinations (pairs, trios, quads) who all homered on the
+same day the most times in the 2026 season. Uses the free MLB Stats API.
 """
 
 import requests
@@ -9,6 +9,8 @@ from itertools import combinations
 from collections import defaultdict
 
 BASE = "https://statsapi.mlb.com/api/v1"
+TOP_N = 20
+
 
 def get_schedule():
     """Return {date_str: [gamePk, ...]} for all final regular-season games."""
@@ -54,16 +56,47 @@ def get_hr_hitters(game_pk):
     return hitters
 
 
+def build_combo_counts(hr_by_date, size):
+    """Count every `size`-player combination that all homered on the same day."""
+    counts = defaultdict(int)
+    dates  = defaultdict(list)
+    for date_str, players in sorted(hr_by_date.items()):
+        for combo in combinations(sorted(players), size):
+            counts[combo] += 1
+            dates[combo].append(date_str)
+    return counts, dates
+
+
+def print_table(title, ranked, dates_map, top=TOP_N):
+    col_combo  = max(len(" / ".join(c)) for c, _ in ranked[:top]) + 2
+    col_combo  = max(col_combo, len("Players"))
+    col_count  = 6
+    col_dates  = 60
+
+    sep = f"+{'-'*(col_combo+2)}+{'-'*(col_count+2)}+{'-'*(col_dates+2)}+"
+    hdr = f"| {'Players':<{col_combo}} | {'Days':>{col_count}} | {'Dates':<{col_dates}} |"
+
+    print(f"\n{title}")
+    print(sep)
+    print(hdr)
+    print(sep)
+    for rank, (combo, count) in enumerate(ranked[:top], 1):
+        names      = " / ".join(combo)
+        dates_str  = ", ".join(dates_map[combo])
+        # Wrap dates if too long
+        if len(dates_str) > col_dates:
+            dates_str = dates_str[:col_dates - 1] + "…"
+        print(f"| {names:<{col_combo}} | {count:>{col_count}} | {dates_str:<{col_dates}} |")
+    print(sep)
+
+
 def main():
     print("Fetching 2026 schedule…")
     games_by_date = get_schedule()
-    total_dates = len(games_by_date)
     total_games = sum(len(v) for v in games_by_date.values())
-    print(f"  {total_dates} game-days, {total_games} completed games\n")
+    print(f"  {len(games_by_date)} game-days, {total_games} completed games\n")
 
-    # date -> set of players who homered that day
     hr_by_date = defaultdict(set)
-
     processed = 0
     for date_str, pks in sorted(games_by_date.items()):
         for pk in pks:
@@ -75,40 +108,15 @@ def main():
             processed += 1
             if processed % 50 == 0:
                 print(f"  …{processed}/{total_games} games fetched")
-            time.sleep(0.05)   # ~20 req/s — polite but fast
+            time.sleep(0.05)
 
-    print(f"\nDone fetching. Building trio counts…\n")
+    print("\nDone fetching. Building combination counts…")
 
-    # Count every 3-player combination across all days
-    trio_counts = defaultdict(int)
-    trio_dates  = defaultdict(list)
-
-    for date_str, players in sorted(hr_by_date.items()):
-        player_list = sorted(players)
-        for trio in combinations(player_list, 3):
-            trio_counts[trio] += 1
-            trio_dates[trio].append(date_str)
-
-    # Sort by count descending
-    ranked = sorted(trio_counts.items(), key=lambda x: -x[1])
-
-    print("=" * 60)
-    print("TOP 20 TRIOS — players who all homered on the same day")
-    print("=" * 60)
-    for rank, (trio, count) in enumerate(ranked[:20], 1):
-        names = " / ".join(trio)
-        dates = ", ".join(trio_dates[trio])
-        print(f"\n#{rank}  {names}")
-        print(f"     {count} shared HR day(s): {dates}")
-
-    if ranked:
-        best_trio, best_count = ranked[0]
-        print("\n" + "=" * 60)
-        print(f"ANSWER: {' / '.join(best_trio)}")
-        print(f"All three homered on the same day {best_count} time(s).")
-        print("=" * 60)
-    else:
-        print("No trio found — check date range or API response.")
+    for size, label in [(2, "PAIRS"), (3, "TRIOS"), (4, "QUADS")]:
+        counts, dates_map = build_combo_counts(hr_by_date, size)
+        ranked = sorted(counts.items(), key=lambda x: -x[1])
+        title = f"TOP {TOP_N} {label} — all homered on the same day (2026 season)"
+        print_table(title, ranked, dates_map)
 
 
 if __name__ == "__main__":
